@@ -5,6 +5,7 @@ import os
 from typing import List, Optional, TYPE_CHECKING
 import google.generativeai as genai
 from PIL import Image
+from utils.request_context import get_request_id
 
 # Try to load .env file if python-dotenv is available
 try:
@@ -77,7 +78,8 @@ class GeminiClient:
                         parts.append(image)
                     except Exception as e:
                         # If image loading fails, continue without image
-                        print("Image failed to load: ", e)
+                        request_id = get_request_id()
+                        print(f"[Request {request_id}] Image failed to load: {e}")
                         pass
                 chat_history.append({"role": "user", "parts": parts})
             elif msg.role == Role.ASSISTANT:
@@ -114,7 +116,8 @@ class GeminiClient:
                     message_image = Image.open(last_user_message.image_path)
                 except Exception as e:
                     # If image loading fails, continue without image
-                    print("Image failed to load: ", e)
+                    request_id = get_request_id()
+                    print(f"[Request {request_id}] Image failed to load: {e}")
                     pass
         
         # Build the prompt with system prompt and tools description if provided

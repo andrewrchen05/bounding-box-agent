@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import List, Optional, Any, Dict
 from uuid import uuid4
+from .request_context import get_request_id
 
 
 class ConversationLogger:
@@ -20,14 +21,18 @@ class ConversationLogger:
         """
         self.output_dir = output_dir
         self.current_conversation_id: Optional[str] = None
+        self.current_request_id: Optional[str] = None
         self.conversation_data: Dict[str, Any] = {}
         
         # Create output directory if it doesn't exist
         os.makedirs(output_dir, exist_ok=True)
     
-    def start_conversation(self) -> str:
+    def start_conversation(self, request_id: Optional[str] = None) -> str:
         """
         Start a new conversation and return its unique ID.
+        
+        Args:
+            request_id: Optional request ID for the initial request
         
         Returns:
             Unique conversation ID
@@ -36,11 +41,13 @@ class ConversationLogger:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid4())[:8]
         self.current_conversation_id = f"{timestamp}_{unique_id}"
+        self.current_request_id = request_id or get_request_id()
         
         # Initialize conversation data
         self.conversation_data = {
             "conversation_id": self.current_conversation_id,
             "started_at": datetime.now().isoformat(),
+            "initial_request_id": self.current_request_id,
             "messages": [],
             "tool_executions": [],
             "responses": []
@@ -61,7 +68,8 @@ class ConversationLogger:
         message_data = {
             "role": message.role.value,
             "content": message.content,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "request_id": get_request_id()
         }
         
         if message.image_path:
@@ -83,6 +91,7 @@ class ConversationLogger:
         
         execution_data = {
             "timestamp": datetime.now().isoformat(),
+            "request_id": get_request_id(),
             "tool_name": tool_use.name,
             "parameters": tool_use.params,
             "success": error is None
@@ -117,6 +126,7 @@ class ConversationLogger:
         
         response_data = {
             "timestamp": datetime.now().isoformat(),
+            "request_id": get_request_id(),
             "type": response.response_type.value
         }
         

@@ -6,7 +6,6 @@ from core.tool import Tool, ToolUse
 from core.models import Message, Role
 from providers.factory import create_model_provider
 from providers.base import ModelProvider
-from prompt.bounding_box_prompt import BOUNDING_BOX_PROMPT
 from .bounding_box_input import BoundingBoxInput
 from .bounding_box import BoundingBox
 from .bounding_box_output import BoundingBoxOutput
@@ -43,9 +42,9 @@ class DetectBoundingBox(Tool):
         # Initialize model provider if not provided
         self.model_provider = model_provider or create_model_provider("gemini", model_name=model_name)
     
-    def get_prompt(self) -> str:
+    def get_prompt_for_orchestrator(self) -> str:
         """
-        Returns the prompt description for this tool to be added to the system prompt.
+        Returns the prompt description for this tool to be added to the orchestrator's system prompt.
         
         Returns:
             A string describing the tool's purpose and usage
@@ -54,12 +53,12 @@ class DetectBoundingBox(Tool):
 Description: {self.description}
 Parameters:
   - image_path (string): Local file path to the image to process (e.g., /path/to/image.jpg or ./assets/image.png)
-  - label (string): The label/class of the item to detect (e.g., 'button', 'text', 'icon')
+  - label (string): The label/class of the item to detect (e.g., 'person', 'car', 'button', 'text').
 
 Input format:
   {{
     "image_path": "/path/to/image.jpg",
-    "label": "button"
+    "label": "person"
   }}
 
 Output format:
@@ -73,9 +72,54 @@ Output format:
   }}
 
 The output contains:
-  - boxes: Array of detected bounding boxes, each with:
+  - boxes: Array of detected bounding boxes for objects matching the label, each with:
     - confidence: Detection confidence score (0.0 to 1.0)
     - xyxy: Bounding box coordinates as [x1, y1, x2, y2] in normalized format (0.0 to 1.0), where (x1,y1) is top-left and (x2,y2) is bottom-right"""
+    
+    def _get_detection_prompt(self) -> str:
+        """
+        Returns the detection prompt to be used as system prompt when calling Gemini.
+        
+        Returns:
+            A string with instructions for bounding box detection
+        """
+        return """You are a computer vision assistant that detects bounding boxes around specific objects in images.
+
+Your task is to analyze an image and detect all instances of a specified label/class, returning their bounding box coordinates.
+All bounding box coordinates MUST be normalized floats between 0.0 and 1.0, relative to the image width and height.
+
+CRITICAL DETECTION RULES:
+1. ONLY detect objects that directly match the requested label - do NOT detect surrounding context, containers, or related objects
+3. For objects: detect the ENTIRE object including all edges, corners, and extensions
+4. Verify each detection actually matches the requested label before including it
+
+You must respond with valid JSON only (no markdown, no extra prose). The response must follow this exact format:
+
+{
+  "boxes": [
+    {
+      "confidence": <confidence_score_0.0_to_1.0>,
+      "xyxy": [x1, y1, x2, y2]
+    }
+  ]
+}
+
+Rules:
+- boxes is an array of all detected instances of the specified label
+- Each box must have:
+  - confidence: A float MUST be between 0.0 and 1.0 representing detection confidence (use lower confidence if you're less certain)
+  - xyxy: An array of exactly 4 floats [x1, y1, x2, y2] where:
+    - (x1, y1) is the top-left corner of the bounding box
+    - (x2, y2) is the bottom-right corner of the bounding box
+    - Coordinates are normalized (0.0 to 1.0), where 0.0 is the left/top edge and 1.0 is the right/bottom edge of the image
+- CRITICAL: The bounding box must fully contain the entire visible extent of the target object without cutting off any part
+- For humans/people/persons: the box MUST extend from the top of the head to the bottom of visible feet/legs, and include full width of body and limbs
+- Only include objects that match the requested label - do NOT include containers, vehicles, or context around the object
+- If no instances are found, return an empty boxes array: "boxes": []
+- Do not include any text outside the JSON
+- All values must be valid JSON (numbers, arrays, objects)
+
+The label to detect will be specified in the user's request."""
     
     def _extract_json_from_response(self, response_text: str) -> Dict[str, Any]:
         """
@@ -152,7 +196,7 @@ The output contains:
         try:
             response_text = self.model_provider.generate_response(
                 messages=[user_message],
-                system_prompt=BOUNDING_BOX_PROMPT,
+                system_prompt=self._get_detection_prompt(),
                 tools_description=None
             )
         except Exception as e:

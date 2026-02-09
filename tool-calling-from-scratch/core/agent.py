@@ -5,6 +5,7 @@ from .models import Message, Role, AssistantResponse, ResponseType
 from providers.base import ModelProvider
 from providers.factory import create_model_provider
 from utils.conversation_logger import ConversationLogger
+from utils.request_context import generate_request_id, set_request_id, get_request_id
 
 
 class Agent:
@@ -48,9 +49,15 @@ class Agent:
         Returns:
             Message: Assistant's final response message
         """
+        # Generate and set request ID for tracing this request through the system
+        request_id = generate_request_id()
+        set_request_id(request_id)
+        
+        print(f"[Request {request_id}] Agent run started with {len(messages)} message(s)")
+        
         # Start a new conversation if this is the first run
         if not self.logger.current_conversation_id:
-            self.logger.start_conversation()
+            self.logger.start_conversation(request_id=request_id)
             # Log existing conversation history (including system message)
             for msg in self.conversation_history:
                 self.logger.log_message(msg)
@@ -72,6 +79,8 @@ class Agent:
         while iteration < max_iterations:
             iteration += 1
             
+            print(f"[Request {request_id}] Iteration {iteration}/{max_iterations}")
+            
             # Generate response based on current conversation history
             assistant_response = self._generate_response_from_history()
             
@@ -84,11 +93,13 @@ class Agent:
                 response = Message(role=Role.ASSISTANT, content=assistant_response.text)
                 self.conversation_history.append(response)
                 self.logger.log_message(response)
+                print(f"[Request {request_id}] Agent run completed successfully after {iteration} iteration(s)")
                 return response
                 
             elif assistant_response.is_tool_use():
                 # Execute all tools and collect results
                 tool_results = []
+                print(f"[Request {request_id}] Executing {len(assistant_response.tool_uses)} tool(s)")
                 for tool_use in assistant_response.tool_uses:
                     try:
                         result = self.execute_tool(tool_use)
@@ -99,6 +110,7 @@ class Agent:
                         self.logger.log_tool_execution(tool_use, result)
                     except Exception as e:
                         tool_results.append(f"{tool_use.name}: Error - {str(e)}")
+                        print(f"[Request {request_id}] Tool execution failed: {tool_use.name} - {str(e)}")
                         # Log failed tool execution
                         self.logger.log_tool_execution(tool_use, None, error=str(e))
                 
@@ -119,6 +131,7 @@ class Agent:
                 return response
         
         # If we've exceeded max iterations, return an error message
+        print(f"[Request {request_id}] Maximum iterations ({max_iterations}) reached")
         error_msg = Message(
             role=Role.ASSISTANT, 
             content=f"Maximum tool execution iterations ({max_iterations}) reached. The agent may be stuck in a loop."
@@ -138,11 +151,11 @@ class Agent:
         if self.tools:
             tool_descriptions = []
             for tool in self.tools:
-                # Use get_prompt() if available for detailed format examples, otherwise fall back to basic description
-                if hasattr(tool, 'get_prompt'):
-                    tool_descriptions.append(tool.get_prompt())
+                # Use get_prompt_for_orchestrator() if available for detailed format examples, otherwise fall back to basic description
+                if hasattr(tool, 'get_prompt_for_orchestrator'):
+                    tool_descriptions.append(tool.get_prompt_for_orchestrator())
                 else:
-                    # Fallback to basic description if get_prompt() is not available
+                    # Fallback to basic description if get_prompt_for_orchestrator() is not available
                     tool_desc = f"- {tool.name}: {tool.description}"
                     if tool.parameters:
                         params_desc = ", ".join([f"{name}" for name in tool.parameters.keys()])
@@ -187,11 +200,11 @@ class Agent:
         if self.tools:
             tool_descriptions = []
             for tool in self.tools:
-                # Use get_prompt() if available for detailed format examples, otherwise fall back to basic description
-                if hasattr(tool, 'get_prompt'):
-                    tool_descriptions.append(tool.get_prompt())
+                # Use get_prompt_for_orchestrator() if available for detailed format examples, otherwise fall back to basic description
+                if hasattr(tool, 'get_prompt_for_orchestrator'):
+                    tool_descriptions.append(tool.get_prompt_for_orchestrator())
                 else:
-                    # Fallback to basic description if get_prompt() is not available
+                    # Fallback to basic description if get_prompt_for_orchestrator() is not available
                     tool_desc = f"- {tool.name}: {tool.description}"
                     if tool.parameters:
                         params_desc = ", ".join([f"{name}" for name in tool.parameters.keys()])
@@ -267,8 +280,6 @@ class Agent:
 
         # Fallback to text if the JSON structure is unexpected
         return AssistantResponse.text_response(response_text.strip())
-    
-    def _parse_tool_use_xml(self, xml_content: str) -> List[ToolUse]:
         """
         Parse tool use from XML content. Handles both wrapped and unwrapped tool elements.
         """

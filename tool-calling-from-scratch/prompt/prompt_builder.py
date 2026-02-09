@@ -19,7 +19,7 @@ class PromptBuilder:
         Build a system prompt by inserting tool descriptions into the base prompt.
         
         Args:
-            tools: List of tool objects that have a get_prompt() method
+            tools: List of tool objects that have a get_prompt_for_orchestrator() method
             
         Returns:
             A complete system prompt with tool descriptions included
@@ -30,8 +30,8 @@ class PromptBuilder:
         # Collect tool prompts
         tool_descriptions = []
         for tool in tools:
-            if hasattr(tool, 'get_prompt'):
-                tool_descriptions.append(tool.get_prompt())
+            if hasattr(tool, 'get_prompt_for_orchestrator'):
+                tool_descriptions.append(tool.get_prompt_for_orchestrator())
         
         if not tool_descriptions:
             return self.base_prompt
